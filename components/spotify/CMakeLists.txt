@@ -34,3 +34,12 @@ set(BELL_EXTERNAL_CJSON "idf::json" CACHE STRING "provide own CJSON")
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/cspot ${CMAKE_CURRENT_BINARY_DIR}/cspot)
 target_link_libraries(${COMPONENT_LIB} PRIVATE cspot ${EXTRA_REQ_LIBS})
 
+# IDF appends its own -std=gnu++11 *after* the C++20 flag above (last flag
+# wins), which breaks C++14+ code (e.g. std::make_unique). Re-assert gnu++2a
+# last on the vendored targets. GCC 8 has no -std=c++20, 2a is its equivalent.
+foreach(_t bell cspot ${COMPONENT_LIB})
+	if(TARGET ${_t})
+		target_compile_options(${_t} PRIVATE -std=gnu++2a)
+	endif()
+endforeach()
+

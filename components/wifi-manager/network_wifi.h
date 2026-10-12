@@ -75,6 +75,7 @@ void network_wifi_set_found_ap(void);
 size_t network_wifi_get_known_count_in_range(void);
 const char * network_wifi_get_next_ap_in_range(void);
 const wifi_sta_config_t* network_wifi_load_active_config();
+const wifi_sta_config_t* network_wifi_get_active_config();
 #ifdef __cplusplus
 }
 #endif
