@@ -8,6 +8,12 @@
 #include <string.h>
 #include "network_ethernet.h"
 #include "network_status.h"
+// Weak: recovery goes straight to wifi and never brings up Ethernet, so it
+// links without network_ethernet.c, the SPI/RMII drivers and libesp_eth.
+// Every call site below NULL-checks; the app image links the strong objects.
+void init_network_ethernet(void) __attribute__((weak));
+bool network_ethernet_enabled(void) __attribute__((weak));
+esp_netif_t *network_ethernet_get_interface(void) __attribute__((weak));
 #include "network_wifi.h"
 
 #include "dns_server.h"
@@ -335,11 +341,11 @@ static state_machine_result_t ETH_STARTING_STATE_entry_handler(state_machine_t* 
     network_handler_entry_print(State_Machine,true);
     ESP_LOGD(TAG, "Looking for ethernet Interface");
     network_t* const nm = (network_t *)State_Machine;
-    init_network_ethernet();
-    if (!network_ethernet_enabled()) {
+    if (init_network_ethernet) init_network_ethernet();
+    if (!network_ethernet_enabled || !network_ethernet_enabled()) {
         network_async_fail();
     } else {
-        nm->eth_netif = network_ethernet_get_interface();
+        nm->eth_netif = network_ethernet_get_interface ? network_ethernet_get_interface() : NULL;
     }
     NETWORK_EXECUTE_CB(State_Machine);
     network_handler_entry_print(State_Machine,false);

@@ -320,7 +320,8 @@ done:
     return err;
 }
 
-esp_err_t ota_flash_deferred(const char *url) {    if (!url || !*url) return ESP_ERR_INVALID_ARG;
+esp_err_t ota_flash_deferred(const char *url) {
+    if (!url || !*url) return ESP_ERR_INVALID_ARG;
     char *allow = config_alloc_get(NVS_TYPE_STR, "ota_allow_flash");
     bool ok = allow && (!strcmp(allow, "1") || !strcasecmp(allow, "y"));
     FREE_AND_NULL(allow);
@@ -331,6 +332,50 @@ esp_err_t ota_flash_deferred(const char *url) {    if (!url || !*url) return ESP
         return ESP_ERR_INVALID_STATE;
     }
     return start_ota(url, NULL, 0);
+}
+
+// App-only NVS defaults (wifi/OTA/MQTT tuning). Registered here instead of
+// esp_app_main so recovery links without these strings. Every consumer falls
+// back to the same compiled defaults when NVS is empty, so behavior is
+// identical with or without the stored entries.
+void register_ota_defaults(void) {
+    static const char *keys[] = {
+        "staapdelay", "ota_allow_flash", "ota_check_h", "mqtt_broker",
+        "mqtt_enable", "mqtt_prefix", "mqtt_user", "mqtt_pass",
+    };
+    static const char *vals[] = {
+        "60", "0", "0", "", "1", "squeezelite", "", "",
+    };
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        char *existing = config_alloc_get(NVS_TYPE_STR, keys[i]);
+        if (!existing) {
+            config_set_default(NVS_TYPE_STR, keys[i], vals[i], 0);
+        }
+        FREE_AND_NULL(existing);
+    }
+}
+
+// Legacy NVS values shipped "-s -disable" as the LMS server, which makes
+// squeezelite start with "LMS is disabled". Strip that token so an empty
+// -s falls back to LMS discovery instead of a host literally named -disable.
+// App-only (recovery ignores squeezelite commands), hence lives here.
+void sanitize_autoexec_lms(void) {
+    char *cmd = config_alloc_get(NVS_TYPE_STR, "autoexec1");
+    if (!cmd) return;
+    const char *bad1 = " -s -disable";
+    const char *bad2 = " -s disable";
+    char *p = strstr(cmd, bad1);
+    const char *bad = bad1;
+    if (!p) { p = strstr(cmd, bad2); bad = bad2; }
+    if (p) {
+        size_t badlen = strlen(bad);
+        size_t tail = strlen(p + badlen);
+        memmove(p, p + badlen, tail + 1);
+        ESP_LOGW(TAG, "Sanitized legacy '-s -disable' from autoexec1, new: %s", cmd);
+        config_set_value(NVS_TYPE_STR, "autoexec1", cmd);
+        wait_for_commit();
+    }
+    free(cmd);
 }
 
 static bool ota_net_up(void) {
@@ -376,6 +421,7 @@ void ota_start_periodic_check(void) {
     static bool started = false;
     if (started) return;
     started = true;
+    register_ota_defaults();
     if (xTaskCreate(&ota_periodic_task, "ota_periodic", OTA_PERIODIC_STACK,
                     NULL, OTA_PERIODIC_PRIO, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to start periodic OTA check task");

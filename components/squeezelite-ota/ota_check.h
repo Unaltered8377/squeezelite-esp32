@@ -16,6 +16,11 @@ esp_err_t ota_check_notify(char **out_json);
 // no reboot). First check runs ~60s after start when network is up.
 void ota_start_periodic_check(void);
 
+// App-only helpers (weak-referenced from shared code so recovery links
+// without them): sanitize legacy LMS server flag, register OTA/MQTT defaults.
+void sanitize_autoexec_lms(void);
+void register_ota_defaults(void);
+
 // Resolve the MQTT broker URI ("mqtt://host:port", malloc'd, caller frees)
 // or NULL when disabled/unresolvable. Order: NVS mqtt_broker, mDNS _mqtt._tcp.
 char * ota_mqtt_broker_resolve(void);

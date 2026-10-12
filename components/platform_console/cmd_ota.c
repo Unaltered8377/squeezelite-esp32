@@ -27,7 +27,9 @@
 #include "sdkconfig.h"
 #include "platform_console.h"
 #include "messaging.h"
-#include "ota_check.h"
+// Extra check/flash commands live in cmd_ota_extra.c (own object) so the
+// recovery image links without them. Weak here; absent in recovery.
+void register_ota_extra(void) __attribute__((weak));
 
 static const char * TAG = "ota";
 extern esp_err_t start_ota(const char * bin_url, char * bin_buffer, uint32_t length);
@@ -57,37 +59,6 @@ static int perform_ota_update(int argc, char **argv)
     return 0;
 }
 
-static int perform_ota_check(int argc, char **argv)
-{
-    (void)argc; (void)argv;
-    char *js = NULL;
-    esp_err_t err = ota_check_notify(&js);
-    if (js) {
-        printf("%s\n", js);
-        ESP_LOGI(TAG, "ota_check: %s", js);
-        free(js);
-    }
-    if (err == ESP_ERR_NOT_FOUND) return 0; // up to date
-    return err == ESP_OK ? 0 : 1;
-}
-
-static struct {
-    struct arg_str *url;
-    struct arg_end *end;
-} ota_flash_args;
-
-static int perform_ota_flash(int argc, char **argv)
-{
-    int nerrors = arg_parse_msg(argc, argv, (struct arg_hdr **)&ota_flash_args);
-    if (nerrors != 0) return 1;
-    esp_err_t err = ota_flash_deferred(ota_flash_args.url->sval[0]);
-    if (err == ESP_ERR_INVALID_STATE) {
-        printf("Flash deferred (notify-only mode). Set ota_allow_flash=1 to enable.\n");
-        return 2;
-    }
-    return err == ESP_OK ? 0 : 1;
-}
-
  void register_ota_cmd()
 {
 	 ota_args.url= arg_str1(NULL, NULL, "<url>", "url of the binary app file");
@@ -102,29 +73,9 @@ static int perform_ota_flash(int argc, char **argv)
     };
     ESP_ERROR_CHECK( esp_console_cmd_register(&cmd) );
 
-    const esp_console_cmd_t check_cmd = {
-        .command = "ota_check",
-        .help = "Notify-only: check GitHub releases for newer firmware of stored variant (no flash). MQTT+LMS notify.",
-        .hint = NULL,
-        .func = &perform_ota_check,
-    };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&check_cmd) );
-
-    ota_flash_args.url = arg_str1(NULL, NULL, "<url>", "firmware binary URL (deferred: needs ota_allow_flash=1)");
-    ota_flash_args.end = arg_end(2);
-    const esp_console_cmd_t flash_cmd = {
-        .command = "ota_flash",
-        .help = "Deferred external flash hook (notify-only by default).",
-        .hint = NULL,
-        .func = &perform_ota_flash,
-        .argtable = &ota_flash_args
-    };
-    ESP_ERROR_CHECK( esp_console_cmd_register(&flash_cmd) );
-
     // Expose to the web UI command list (/commands.json -> Execute cards).
     cmd_to_json(&cmd);
-    cmd_to_json(&check_cmd);
-    cmd_to_json(&flash_cmd);
+    if (register_ota_extra) register_ota_extra();
 }
 
 

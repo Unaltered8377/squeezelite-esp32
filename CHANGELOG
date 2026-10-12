@@ -1,3 +1,14 @@
+2026-10-12
+ - fix recovery.bin overflowing its 1280K factory partition: weak-link
+   app-only code out of the recovery image (OTA notify/MQTT/mDNS/telnet/
+   Ethernet incl. libesp_eth and drivers); recovery keeps UART console,
+   wifi with failover, web upload and OTA
+ - pin partitions.csv to the release layout with explicit offsets
+   (ota_0 @0x150000); auto-offset previously resolved 0x240000 and broke
+   flashing with an overlap error
+ - local build fixes: export wifi active-config getter, force gnu++2a last
+   on cspot libs (IDF appends -std=gnu++11 after C++20 flag)
+
 2026-10-10
  - wifi-manager: sequential failover across known APs (least-recently-tried,
    fewest consecutive fails first), APSTA portal fallback timer (staapdelay),

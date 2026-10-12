@@ -12,6 +12,11 @@
 #include "monitor.h"
 #include "network_ethernet.h"
 #include "network_wifi.h"
+// Weak: recovery never brings up Ethernet (it goes straight to wifi), so it
+// links without network_ethernet.c, the SPI/RMII drivers and libesp_eth.
+bool network_ethernet_enabled(void) __attribute__((weak));
+bool network_ethernet_is_up(void) __attribute__((weak));
+esp_netif_t *network_ethernet_get_interface(void) __attribute__((weak));
 #include "platform_config.h"
 #include "platform_esp32.h"
 #include "tools.h"
@@ -280,8 +285,8 @@ cJSON* network_status_get_basic_info(cJSON** old) {
 #else
         *old = network_status_update_bool(old, "is_i2c_locked", false);
 #endif
-        if (network_ethernet_enabled()) {
-            *old = network_status_update_bool(old, "eth_up", network_ethernet_is_up());
+        if (network_ethernet_enabled && network_ethernet_enabled()) {
+            *old = network_status_update_bool(old, "eth_up", network_ethernet_is_up ? network_ethernet_is_up() : false);
         }
         if (lms_server_cport > 0) {
             *old = network_update_cjson_number(old, "lms_cport", lms_server_cport);
@@ -336,9 +341,10 @@ void network_status_update_ip_info(update_reason_code_t update_reason_code) {
             cJSON_DeleteItemFromObjectCaseSensitive(ip_info_cjson, "ssid");
         }
         ESP_LOGD(TAG,"Checking if ethernet interface is connected");
-        if (network_is_interface_connected(network_ethernet_get_interface())) {
+        esp_netif_t *eth_if = network_ethernet_get_interface ? network_ethernet_get_interface() : NULL;
+        if (network_is_interface_connected(eth_if)) {
             network_update_cjson_string(&ip_info_cjson, "if", "eth");
-            esp_netif_get_ip_info(network_ethernet_get_interface(), &ip_info);
+            esp_netif_get_ip_info(eth_if, &ip_info);
             network_status_update_address(ip_info_cjson, &ip_info);
         } 
         network_status_unlock_json_buffer();

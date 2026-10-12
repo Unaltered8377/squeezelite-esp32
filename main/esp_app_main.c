@@ -33,6 +33,14 @@
 #include "network_manager.h"
 #include "squeezelite-ota.h"
 #include "ota_check.h"
+// Weak so the recovery image links without the notify objects (see call site).
+void ota_start_periodic_check(void) __attribute__((weak));
+// Weak so recovery links without libmdns (no services to advertise there).
+esp_err_t mdns_init(void) __attribute__((weak));
+esp_err_t mdns_hostname_set(const char *hostname) __attribute__((weak));
+// Weak so recovery links without libtelnet (UART console suffices there).
+void init_telnet(void) __attribute__((weak));
+void start_telnet(void *pvParameter) __attribute__((weak));
 #include <math.h>
 #include "audio_controls.h"
 #include "platform_config.h"
@@ -114,14 +122,6 @@ const DefaultStringVal defaultStringVals[] = {
     {"pollmin", "15"},
     {"ethtmout", "8"},
     {"dhcp_tmout", "8"},
-    {"staapdelay", "60"},
-    {"ota_allow_flash", "0"},
-    {"ota_check_h", "0"},
-    {"mqtt_broker", ""},
-    {"mqtt_enable", "1"},
-    {"mqtt_prefix", "squeezelite"},
-    {"mqtt_user", ""},
-    {"mqtt_pass", ""},
     {"target", CONFIG_TARGET},
     {"led_vu_config", ""},
 	{"autoexec", "1"},	
@@ -169,8 +169,11 @@ void cb_connection_got_ip(nm_state_t new_state, int sub_state){
 
 	// initializing mDNS
 	network_get_hostname(&hostname);
-    mdns_init();
-    mdns_hostname_set(hostname);
+	// Weak: recovery never advertises services, so it links without libmdns.
+	if (mdns_init) {
+		mdns_init();
+		mdns_hostname_set(hostname);
+	}
 	
 	ESP_LOGI(TAG, "Network connected and mDNS initialized with %s", hostname);
 
@@ -324,27 +327,9 @@ void register_default_nvs(){
 	ESP_LOGD(TAG,"Done setting default values in nvs.");
 }
 
-// Legacy NVS values shipped "-s -disable" as the LMS server, which makes
-// squeezelite start with "LMS is disabled". Strip that token so an empty
-// -s falls back to LMS discovery instead of a host literally named -disable.
-static void sanitize_autoexec_lms(void) {
-	char *cmd = config_alloc_get(NVS_TYPE_STR, "autoexec1");
-	if (!cmd) return;
-	const char *bad1 = " -s -disable";
-	const char *bad2 = " -s disable";
-	char *p = strstr(cmd, bad1);
-	const char *bad = bad1;
-	if (!p) { p = strstr(cmd, bad2); bad = bad2; }
-	if (p) {
-		size_t badlen = strlen(bad);
-		size_t tail = strlen(p + badlen);
-		memmove(p, p + badlen, tail + 1);
-		ESP_LOGW(TAG, "Sanitized legacy '-s -disable' from autoexec1, new: %s", cmd);
-		config_set_value(NVS_TYPE_STR, "autoexec1", cmd);
-		wait_for_commit();
-	}
-	free(cmd);
-}
+// Weak: app-only helpers live in ota_check.c so recovery links without them.
+void sanitize_autoexec_lms(void) __attribute__((weak));
+void register_ota_defaults(void) __attribute__((weak));
 
 uint32_t halSTORAGE_RebootCounterRead(void) { return RebootCounter ; }
 uint32_t halSTORAGE_RebootCounterUpdate(int32_t xValue) { 
@@ -358,7 +343,7 @@ uint32_t halSTORAGE_RebootCounterUpdate(int32_t xValue) {
 	}
 
 void handle_ap_connect(nm_state_t new_state, int sub_state){
-	start_telnet(NULL);
+	if (start_telnet) start_telnet(NULL);
 }
 void handle_network_up(nm_state_t new_state, int sub_state){
 	halSTORAGE_RebootCounterUpdate(0);
@@ -413,7 +398,7 @@ void app_main()
 	initialize_nvs();
 	MEMTRACE_PRINT_DELTA();
 	ESP_LOGI(TAG,"Setting up telnet.");
-	init_telnet(); // align on 32 bits boundaries
+	if (init_telnet) init_telnet(); // align on 32 bits boundaries
 	MEMTRACE_PRINT_DELTA();
 	ESP_LOGI(TAG,"Setting up config subsystem.");
 	config_init();
@@ -425,7 +410,7 @@ void app_main()
 
 	ESP_LOGI(TAG,"Registering default values");
 	register_default_nvs();
-	sanitize_autoexec_lms();
+	if (sanitize_autoexec_lms) sanitize_autoexec_lms();
 	MEMTRACE_PRINT_DELTA();
 	ESP_LOGI(TAG,"Configuring services");
 	services_init();
@@ -504,7 +489,9 @@ void app_main()
 	MEMTRACE_PRINT_DELTA_MESSAGE("Console started");
 	// Periodic notify-only OTA check (NVS ota_check_h, 0 = disabled).
 	// Task self-gates on wifi association; safe in both app partitions.
-	ota_start_periodic_check();
+	// Weak linkage: the recovery image never references the notify objects,
+	// so the linker drops ota_check/ota_mqtt/mqtt from recovery entirely.
+	if (!is_recovery_running && ota_start_periodic_check) ota_start_periodic_check();
 	if(fwurl && strlen(fwurl)>0){
 		if(is_recovery_running){
 			while(!bNetworkConnected){

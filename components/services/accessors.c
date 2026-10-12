@@ -34,6 +34,10 @@
 #include "monitor.h"
 #include "messaging.h"
 #include "network_ethernet.h"
+// Weak: recovery never configures Ethernet, so it links without
+// network_ethernet.c, the SPI/RMII drivers and libesp_eth. Call site
+// NULL-checks; the app image links the strong objects.
+network_ethernet_driver_t* network_ethernet_driver_autodetect(const char* Driver) __attribute__((weak));
 
 static const char *TAG = "services";
 const char *i2c_name_type="I2C";
@@ -172,7 +176,8 @@ const eth_config_t * config_eth_get_from_str(char* config ){
 		return &eth_config;
 	}
 
-	network_ethernet_driver_t* network_driver = network_ethernet_driver_autodetect(eth_config.model);
+	network_ethernet_driver_t* network_driver = (network_ethernet_driver_autodetect ?
+		network_ethernet_driver_autodetect(eth_config.model) : NULL);
 	
 	if(!network_driver || !network_driver->valid){
 		messaging_post_message(MESSAGING_ERROR,MESSAGING_CLASS_SYSTEM,"Ethernet config invalid: model %s %s",eth_config.model,network_driver?"was not compiled in":"was not found"); 
