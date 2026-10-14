@@ -702,6 +702,11 @@ static state_machine_result_t NETWORK_WIFI_CONFIGURING_ACTIVE_STATE_handler(stat
             network_status_update_ip_info(UPDATE_CONNECTION_OK);
             result = local_traverse_state(State_Machine, &Wifi_Active_State[WIFI_CONNECTED_STATE],__FUNCTION__);
             break;
+        case EN_CONNECTED:
+            // Associated, waiting for DHCP; GOT_IP (above) does the real work.
+            ESP_LOGD(TAG, "STA associated while portal open, waiting for IP");
+            result = EVENT_HANDLED;
+            break;
         case EN_LINK_UP:
             ESP_LOGW(TAG, "Ethernet link up in wifi mode");
             break;
