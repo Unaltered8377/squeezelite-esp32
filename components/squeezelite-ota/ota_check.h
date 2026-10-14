@@ -29,8 +29,16 @@ char * ota_mqtt_broker_resolve(void);
 // LWT status topic, subscribes <prefix>/<host>/ota/set for remote commands:
 // {"cmd":"check"} runs ota_check_notify, {"cmd":"flash","url":"..."} runs
 // the deferred flash hook (still gated by NVS ota_allow_flash).
+// On (re)connect it publishes HA discovery + last state (both retained) and
+// runs a check when no state exists yet, so the HA sensor appears on boot.
+// Log feed goes to <prefix>/<host>/ota/log (state topic stays clean JSON).
 // NVS mqtt_enable "0" disables entirely.
 void ota_mqtt_start(void);
+
+// Publish an OTA check-result JSON: via the persistent client when connected,
+// else a one-shot client (distinct client id, connect-synced, then stopped).
+// Also (re)publishes HA discovery and remembers the payload for reconnects.
+void ota_mqtt_publish_result(const char *payload_json);
 
 // Persist running firmware identity into NVS (ota_current/ota_variant/
 // ota_branch/ota_build). Safe to call repeatedly; no-ops when unchanged.

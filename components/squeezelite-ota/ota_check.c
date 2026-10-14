@@ -152,55 +152,6 @@ char * ota_mqtt_broker_resolve(void) {
     return uri;
 }
 
-// Best-effort MQTT publish. Disabled when no broker resolves.
-static void mqtt_publish_ota(const char *payload_json) {
-    char *broker = ota_mqtt_broker_resolve();
-    if (!broker) return;
-    char *prefix = nvs_str_or("mqtt_prefix", "squeezelite");
-    char *host = nvs_str_or("host_name", "squeezelite");
-    // sanitize hostname for topics: cut at first space/comma
-    for (char *p = host; *p; p++) if (*p == ' ' || *p == ',') *p = '_';
-    char topic[160], disc_topic[180];
-    snprintf(topic, sizeof(topic), "%s/%s/ota", prefix, host);
-    snprintf(disc_topic, sizeof(disc_topic), "homeassistant/sensor/%s_ota/config", host);
-    char *user = config_alloc_get(NVS_TYPE_STR, "mqtt_user");
-    char *pass = config_alloc_get(NVS_TYPE_STR, "mqtt_pass");
-    // IDF v4.4 (this project: idfv448) uses flat .uri/.username/.password
-    esp_mqtt_client_config_t cfg = { 0 };
-    cfg.uri = broker;
-    if (user && strlen(user)) cfg.username = user;
-    if (pass && strlen(pass)) cfg.password = pass;
-    esp_mqtt_client_handle_t c = esp_mqtt_client_init(&cfg);
-    if (!c) goto out;
-    if (esp_mqtt_client_start(c) != ESP_OK) { esp_mqtt_client_destroy(c); goto out; }
-    // esp-mqtt connects async with no sync-wait API; publish() only queues.
-    // Give the client a fixed window to connect, publish state + discovery,
-    // then flush. Best-effort: if the broker is unreachable both are dropped.
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    if (esp_mqtt_client_publish(c, topic, payload_json, 0, 1, 1) < 0) {
-        ESP_LOGW(TAG, "MQTT publish to %s failed", topic);
-    }
-    // HA discovery (retained): value_template reads .available
-    {
-        cJSON *d = cJSON_CreateObject();
-        cJSON_AddStringToObject(d, "name", "Squeezelite OTA");
-        cJSON_AddStringToObject(d, "stat_t", topic);
-        cJSON_AddStringToObject(d, "val_tpl", "{{ value_json.available }}");
-        cJSON_AddStringToObject(d, "json_attr_t", topic);
-        char *ids = malloc(strlen(host) + 16);
-        if (ids) { sprintf(ids, "%s_ota", host); cJSON_AddStringToObject(d, "uniq_id", ids); free(ids); }
-        char *ds = cJSON_PrintUnformatted(d);
-        if (ds) { esp_mqtt_client_publish(c, disc_topic, ds, 0, 1, 1); free(ds); }
-        cJSON_Delete(d);
-    }
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_mqtt_client_stop(c);
-    esp_mqtt_client_destroy(c);
-out:
-    FREE_AND_NULL(broker); FREE_AND_NULL(prefix); FREE_AND_NULL(host);
-    FREE_AND_NULL(user); FREE_AND_NULL(pass);
-}
-
 esp_err_t ota_check_notify(char **out_json) {
     if (out_json) *out_json = NULL;
     ota_persist_current_version();
@@ -298,7 +249,7 @@ esp_err_t ota_check_notify(char **out_json) {
             char *mjstr = cJSON_PrintUnformatted(mj);
             if (mjstr) { messaging_post_text(MESSAGING_INFO, MESSAGING_CLASS_OTA, mjstr); free(mjstr); }
             cJSON_Delete(mj);
-            mqtt_publish_ota(js ? js : "{}");
+            ota_mqtt_publish_result(js ? js : "{}");
             if (out_json) *out_json = js; else free(js);
             ESP_LOGI(TAG, "Update available: %s -> %s", cur, best_tag);
         } else {
@@ -306,7 +257,7 @@ esp_err_t ota_check_notify(char **out_json) {
             char *js = cJSON_PrintUnformatted(msg);
             ESP_LOGI(TAG, "No OTA update (current %s, variant %s)", cur, want_variant);
             messaging_post_message(MESSAGING_INFO, MESSAGING_CLASS_OTA, "OTA check: up to date (%s)", cur);
-            mqtt_publish_ota(js ? js : "{}");
+            ota_mqtt_publish_result(js ? js : "{}");
             if (out_json) *out_json = js; else free(js);
             err = ESP_ERR_NOT_FOUND;
         }

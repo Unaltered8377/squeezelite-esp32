@@ -675,17 +675,33 @@ static state_machine_result_t NETWORK_WIFI_CONFIGURING_ACTIVE_STATE_handler(stat
         case EN_TIMER: {
             // APSTA portal stays up; keep polling known APs in background
             // (sequential failover). Previously unhandled -> "Unhandled Event" log.
-            ESP_LOGI(TAG,"AP portal background STA poll (%s)",
-                STR_OR_ALT(((network_t*)State_Machine)->timer_tag,"timer"));
-            network_wifi_set_found_ap();
-            if (network_wifi_connect_next_in_range() != ESP_OK) {
-                network_wifi_start_scan();
+            // Never yank a live association: if STA is already connected,
+            // reconnecting here self-inflicts ASSOC_LEAVE and kills open
+            // sockets (slimproto) every poll cycle. Poll only while down.
+            wifi_ap_record_t ap_info;
+            if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+                ESP_LOGD(TAG, "AP portal background STA poll: STA already associated (%.32s), skipping failover",
+                    ap_info.ssid);
+            } else {
+                ESP_LOGI(TAG,"AP portal background STA poll (%s)",
+                    STR_OR_ALT(((network_t*)State_Machine)->timer_tag,"timer"));
+                network_wifi_set_found_ap();
+                if (network_wifi_connect_next_in_range() != ESP_OK) {
+                    network_wifi_start_scan();
+                }
             }
             network_set_timer(((network_t*)State_Machine)->sta_polling_min_ms,
                 "AP portal background STA poll");
             result = EVENT_HANDLED;
             break;
         }
+        case EN_GOT_IP:
+            // STA came up while the portal was open (APSTA). Same as the
+            // ACTIVE branch: record it and leave the portal for the CONNECTED
+            // state (exit handler tears down AP/DNS, polling ends here).
+            network_status_update_ip_info(UPDATE_CONNECTION_OK);
+            result = local_traverse_state(State_Machine, &Wifi_Active_State[WIFI_CONNECTED_STATE],__FUNCTION__);
+            break;
         case EN_LINK_UP:
             ESP_LOGW(TAG, "Ethernet link up in wifi mode");
             break;
